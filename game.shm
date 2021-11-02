@@ -1,0 +1,10 @@
+let ascii_space = 32;
+
+let blue = color(0.2, 0.2, 1.0, 1.0);
+
+fn loop() {
+    let a = 0;
+    draw_text("space pressed: " + str(is_key_pressed(ascii_space)), 0.0, 20.0, 30.0, blue);
+}
+
+return loop;
