@@ -9,8 +9,10 @@ use libshim::Userdata;
 use std::any::Any;
 use std::ops::Deref;
 
-use macroquad::prelude::*;
+use libshim::ShimInto;
+
 use macroquad::color::Color;
+use macroquad::prelude::*;
 
 struct ColorHandle {
     color: Color,
@@ -71,63 +73,45 @@ async fn main() {
         )
         .unwrap();
 
-    interpreter
-        .add_global(
-            b"draw_text",
-            libshim::ShimValue::NativeFn(Box::new(move |args, interpreter| {
-                if args.len() != 5 {
-                    return Err(ShimError::Other(b"wrong arity"));
-                }
+    macro_rules! shim_fn {
+        ($name:expr, $interpreter:ident, $text:ident, $x:ident, $y:ident, $size:ident, $color_handle:ident, $code:tt) => {
+            $interpreter
+                .add_global(
+                    $name,
+                    libshim::ShimValue::NativeFn(Box::new(move |args, $interpreter| {
+                        if args.len() != 5 {
+                            return Err(ShimError::Other(b"wrong arity"));
+                        }
 
-                let arg0 = &*args[0].borrow();
-                let text = if let ShimValue::SString(text) = arg0 {
-                    text
-                } else {
-                    return Err(ShimError::Other(b"arg 0 should be SString"));
-                };
-                let arg1 = &*args[1].borrow();
-                let x = if let ShimValue::F64(x) = arg1 {
-                    *x as f32
-                } else {
-                    return Err(ShimError::Other(b"arg 1 should be F64"));
-                };
-                let arg2 = &*args[2].borrow();
-                let y = if let ShimValue::F64(y) = arg2 {
-                    *y as f32
-                } else {
-                    return Err(ShimError::Other(b"arg 2 should be F64"));
-                };
-                let arg3 = &*args[3].borrow();
-                let size = if let ShimValue::F64(size) = arg3 {
-                    *size as f32
-                } else {
-                    return Err(ShimError::Other(b"arg 3 should be F64"));
-                };
-                let arg4 = &*args[4].borrow();
-                let color = if let libshim::ShimValue::Userdata(u) = arg4 {
-                    let data = u.deref() as &dyn Any;
+                        let arg0 = &*args[0].borrow();
+                        let $text: &[u8] = arg0.shim_into()?;
+                        let arg1 = &*args[1].borrow();
+                        let $x: f32 = arg1.shim_into()?;
+                        let arg2 = &*args[2].borrow();
+                        let $y: f32 = arg2.shim_into()?;
+                        let arg3 = &*args[3].borrow();
+                        let $size: f32 = arg3.shim_into()?;
+                        let arg4 = &*args[4].borrow();
+                        let $color_handle: &ColorHandle = arg4.shim_into()?;
 
-                    if let Some(ColorHandle { color }) = data.downcast_ref::<ColorHandle>() {
-                        color
-                    } else {
-                        return Err(ShimError::Other(b"arg 4 should be ColorHandle Userdata"));
-                    }
-                } else {
-                    return Err(ShimError::Other(b"arg 4 should be Userdata"));
-                };
+                        $code
+                    })),
+                )
+                .unwrap();
+        };
+    }
 
-                draw_text(
-                    &std::str::from_utf8(text).unwrap().to_string(),
-                    x,
-                    y,
-                    size,
-                    *color,
-                );
+    shim_fn!(b"draw_text", interpreter, text, x, y, size, color_handle, {
+        draw_text(
+            &std::str::from_utf8(text).unwrap().to_string(),
+            x,
+            y,
+            size,
+            color_handle.color,
+        );
 
-                Ok(interpreter.g.the_unit.clone())
-            })),
-        )
-        .unwrap();
+        Ok(interpreter.g.the_unit.clone())
+    });
 
     interpreter
         .add_global(
@@ -202,10 +186,21 @@ async fn main() {
     loop {
         clear_background(BLACK);
 
-        loop_fn
+        let result = loop_fn
             .borrow()
-            .call(&AVec::new(allocator), &mut interpreter)
-            .unwrap();
+            .call(&AVec::new(allocator), &mut interpreter);
+
+        match result {
+            Ok(_) => {}
+            Err(ShimError::Other(text)) => {
+                println!("ERROR: {}", std::str::from_utf8(text).unwrap());
+                return;
+            }
+            Err(_) => {
+                println!("Some other error");
+                return;
+            }
+        }
 
         next_frame().await
     }
