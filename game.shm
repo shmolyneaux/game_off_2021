@@ -1,10 +1,33 @@
-let ascii_space = 32;
+let esc_key = 256;
+let up_key = 265;
+let down_key = 264;
+let space_key = 32;
 
 let blue = color(0.2, 0.2, 1.0, 1.0);
+let white = color(1.0, 1.0, 1.0, 1.0);
 
+let x = 0.0;
+let y = 20.0;
 fn loop() {
+    if is_key_pressed(esc_key) {
+        // This will terminate since this identifier isn't defined :)
+        exit()
+    }
+
+    let down_pressed = is_key_pressed(down_key);
+    let up_pressed = is_key_pressed(up_key);
+    if down_pressed {
+        y = y + 4.0;
+    }
+    if up_pressed {
+        y = y - 4.0;
+    }
+
     let a = 0;
-    draw_text("space pressed: " + str(is_key_pressed(ascii_space)), 0.0, 20.0, 30.0, blue);
+    draw_text(
+        "going up! " + str(is_key_pressed(up_key)),
+        x, y, 30.0, white
+    );
 }
 
 return loop;
