@@ -21,7 +21,7 @@ struct ColorHandle {
 impl Userdata for ColorHandle {}
 
 macro_rules! unpack_args {
-    ($args:ident, $count:expr) => {};
+    ($args:ident, $count:expr,) => {};
     ($args:ident, $count:expr, $arg_v:ident:$arg_t:ty) => {
         let arg0 = &*$args[$count].borrow();
         let $arg_v: $arg_t = arg0.shim_into()?;
@@ -38,7 +38,7 @@ macro_rules! unpack_args {
 }
 
 macro_rules! count {
-    () => {};
+    () => {0};
     ($arg_v:ident:$arg_t:ty) => {
         1
     };
@@ -73,29 +73,19 @@ async fn main() {
     let allocator = std::alloc::Global;
     let mut interpreter = libshim::Interpreter::new(allocator);
 
-    interpreter
-        .add_global(
-            b"mouse_pos_x",
-            libshim::ShimValue::NativeFn(Box::new(move |args, interpreter| {
-                if args.len() != 0 {
-                    return Err(ShimError::Other(b"wrong arity"));
-                }
-                interpreter.new_value(ShimValue::F64(macroquad::input::mouse_position().0 as f64))
-            })),
-        )
-        .unwrap();
+    shim_fn!(
+        interpreter,
+        fn mouse_pos_x() {
+            interpreter.new_value(macroquad::input::mouse_position().0 as f64)
+        }
+    );
 
-    interpreter
-        .add_global(
-            b"mouse_pos_y",
-            libshim::ShimValue::NativeFn(Box::new(move |args, interpreter| {
-                if args.len() != 0 {
-                    return Err(ShimError::Other(b"wrong arity"));
-                }
-                interpreter.new_value(ShimValue::F64(macroquad::input::mouse_position().1 as f64))
-            })),
-        )
-        .unwrap();
+    shim_fn!(
+        interpreter,
+        fn mouse_pos_y() {
+            interpreter.new_value(macroquad::input::mouse_position().1 as f64)
+        }
+    );
 
     interpreter
         .add_global(
@@ -106,20 +96,15 @@ async fn main() {
         )
         .unwrap();
 
-    interpreter
-        .add_global(
-            b"is_key_pressed",
-            libshim::ShimValue::NativeFn(Box::new(move |args, interpreter| {
-                if let ShimValue::I128(num) = &*args[0].borrow() {
-                    interpreter.new_value(ShimValue::Bool(macroquad::input::is_key_down(
-                        macroquad::input::KeyCode::from(*num as u32),
-                    )))
-                } else {
-                    Ok(interpreter.g.the_unit.clone())
-                }
-            })),
-        )
-        .unwrap();
+    shim_fn!(
+        interpreter,
+        fn is_key_pressed(key: u32) {
+            let key_is_down = macroquad::input::is_key_down(
+                macroquad::input::KeyCode::from(key),
+            );
+            interpreter.new_value(key_is_down)
+        }
+    );
 
     shim_fn!(
         interpreter,
@@ -136,45 +121,14 @@ async fn main() {
         }
     );
 
-    interpreter
-        .add_global(
-            b"color",
-            libshim::ShimValue::NativeFn(Box::new(move |args, interpreter| {
-                if args.len() != 4 {
-                    return Err(ShimError::Other(b"wrong arity"));
-                }
-
-                let arg0 = &*args[0].borrow();
-                let r = if let ShimValue::F64(r) = arg0 {
-                    *r as f32
-                } else {
-                    return Err(ShimError::Other(b"arg 0 should be SString"));
-                };
-                let arg1 = &*args[1].borrow();
-                let g = if let ShimValue::F64(g) = arg1 {
-                    *g as f32
-                } else {
-                    return Err(ShimError::Other(b"arg 1 should be F64"));
-                };
-                let arg2 = &*args[2].borrow();
-                let b = if let ShimValue::F64(b) = arg2 {
-                    *b as f32
-                } else {
-                    return Err(ShimError::Other(b"arg 2 should be F64"));
-                };
-                let arg3 = &*args[3].borrow();
-                let a = if let ShimValue::F64(a) = arg3 {
-                    *a as f32
-                } else {
-                    return Err(ShimError::Other(b"arg 3 should be F64"));
-                };
-
-                interpreter.new_value(ShimValue::Userdata(Box::new(ColorHandle {
-                    color: Color::new(r, g, b, a),
-                })))
-            })),
-        )
-        .unwrap();
+    shim_fn!(
+        interpreter,
+        fn color(r: f32, g: f32, b: f32, a: f32) {
+            interpreter.new_value(ShimValue::Userdata(Box::new(ColorHandle {
+                color: Color::new(r, g, b, a),
+            })))
+        }
+    );
 
     interpreter
         .add_global(
