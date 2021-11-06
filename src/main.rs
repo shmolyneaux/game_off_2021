@@ -20,6 +20,54 @@ struct ColorHandle {
 
 impl Userdata for ColorHandle {}
 
+macro_rules! unpack_args {
+    ($args:ident, $count:expr) => {};
+    ($args:ident, $count:expr, $arg_v:ident:$arg_t:ty) => {
+        let arg0 = &*$args[$count].borrow();
+        let $arg_v: $arg_t = arg0.shim_into()?;
+    };
+    ($args:ident, $count:expr, $arg_v:ident:$arg_t:ty, $($xs_arg_v:ident:$xs_arg_t:ty),*) => {
+        let arg0 = &*$args[$count].borrow();
+        let $arg_v: $arg_t = arg0.shim_into()?;
+        unpack_args!(
+            $args,
+            $count + 1,
+            $($xs_arg_v:$xs_arg_t),*
+        );
+    }
+}
+
+macro_rules! count {
+    () => {};
+    ($arg_v:ident:$arg_t:ty) => {
+        1
+    };
+    ($arg_v:ident:$arg_t:ty, $($xs_arg_v:ident:$xs_arg_t:ty),*) => {
+        1 + count!($($xs_arg_v:$xs_arg_t),*)
+    }
+}
+
+macro_rules! shim_fn {
+    (
+        $interpreter:ident,
+        fn $name:ident ($($arg_v:ident:$arg_t:ty),*) $code:tt) => {
+        $interpreter
+            .add_global(
+                stringify!($name).as_bytes(),
+                libshim::ShimValue::NativeFn(Box::new(move |args, $interpreter| {
+                    if args.len() != count!($($arg_v:$arg_t),*) {
+                        return Err(ShimError::Other(b"wrong arity"));
+                    }
+
+                    unpack_args!(args, 0, $($arg_v:$arg_t),*);
+
+                    $code
+                })),
+            )
+            .unwrap();
+    };
+}
+
 #[macroquad::main("Shimlang Test")]
 async fn main() {
     let allocator = std::alloc::Global;
@@ -72,54 +120,6 @@ async fn main() {
             })),
         )
         .unwrap();
-
-    macro_rules! unpack_args {
-        ($args:ident, $count:expr) => {};
-        ($args:ident, $count:expr, $arg_v:ident:$arg_t:ty) => {
-            let arg0 = &*$args[$count].borrow();
-            let $arg_v: $arg_t = arg0.shim_into()?;
-        };
-        ($args:ident, $count:expr, $arg_v:ident:$arg_t:ty, $($xs_arg_v:ident:$xs_arg_t:ty),*) => {
-            let arg0 = &*$args[$count].borrow();
-            let $arg_v: $arg_t = arg0.shim_into()?;
-            unpack_args!(
-                $args,
-                $count + 1,
-                $($xs_arg_v:$xs_arg_t),*
-            );
-        }
-    }
-
-    macro_rules! count {
-        () => {};
-        ($arg_v:ident:$arg_t:ty) => {
-            1
-        };
-        ($arg_v:ident:$arg_t:ty, $($xs_arg_v:ident:$xs_arg_t:ty),*) => {
-            1 + count!($($xs_arg_v:$xs_arg_t),*)
-        }
-    }
-
-    macro_rules! shim_fn {
-        (
-            $interpreter:ident,
-            fn $name:ident ($($arg_v:ident:$arg_t:ty),*) $code:tt) => {
-            $interpreter
-                .add_global(
-                    stringify!($name).as_bytes(),
-                    libshim::ShimValue::NativeFn(Box::new(move |args, $interpreter| {
-                        if args.len() != count!($($arg_v:$arg_t),*) {
-                            return Err(ShimError::Other(b"wrong arity"));
-                        }
-
-                        unpack_args!(args, 0, $($arg_v:$arg_t),*);
-
-                        $code
-                    })),
-                )
-                .unwrap();
-        };
-    }
 
     shim_fn!(
         interpreter,
