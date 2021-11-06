@@ -73,26 +73,46 @@ async fn main() {
         )
         .unwrap();
 
+    macro_rules! unpack_args {
+        ($args:ident, $count:expr) => {};
+        ($args:ident, $count:expr, $arg_v:ident:$arg_t:ty) => {
+            let arg0 = &*$args[$count].borrow();
+            let $arg_v: $arg_t = arg0.shim_into()?;
+        };
+        ($args:ident, $count:expr, $arg_v:ident:$arg_t:ty, $($xs_arg_v:ident:$xs_arg_t:ty),*) => {
+            let arg0 = &*$args[$count].borrow();
+            let $arg_v: $arg_t = arg0.shim_into()?;
+            unpack_args!(
+                $args,
+                $count + 1,
+                $($xs_arg_v:$xs_arg_t),*
+            );
+        }
+    }
+
+    macro_rules! count {
+        () => {};
+        ($arg_v:ident:$arg_t:ty) => {
+            1
+        };
+        ($arg_v:ident:$arg_t:ty, $($xs_arg_v:ident:$xs_arg_t:ty),*) => {
+            1 + count!($($xs_arg_v:$xs_arg_t),*)
+        }
+    }
+
     macro_rules! shim_fn {
-        ($name:expr, $interpreter:ident, $text:ident, $x:ident, $y:ident, $size:ident, $color_handle:ident, $code:tt) => {
+        (
+            $interpreter:ident,
+            fn $name:ident ($($arg_v:ident:$arg_t:ty),*) $code:tt) => {
             $interpreter
                 .add_global(
-                    $name,
+                    stringify!($name).as_bytes(),
                     libshim::ShimValue::NativeFn(Box::new(move |args, $interpreter| {
-                        if args.len() != 5 {
+                        if args.len() != count!($($arg_v:$arg_t),*) {
                             return Err(ShimError::Other(b"wrong arity"));
                         }
 
-                        let arg0 = &*args[0].borrow();
-                        let $text: &[u8] = arg0.shim_into()?;
-                        let arg1 = &*args[1].borrow();
-                        let $x: f32 = arg1.shim_into()?;
-                        let arg2 = &*args[2].borrow();
-                        let $y: f32 = arg2.shim_into()?;
-                        let arg3 = &*args[3].borrow();
-                        let $size: f32 = arg3.shim_into()?;
-                        let arg4 = &*args[4].borrow();
-                        let $color_handle: &ColorHandle = arg4.shim_into()?;
+                        unpack_args!(args, 0, $($arg_v:$arg_t),*);
 
                         $code
                     })),
@@ -101,17 +121,20 @@ async fn main() {
         };
     }
 
-    shim_fn!(b"draw_text", interpreter, text, x, y, size, color_handle, {
-        draw_text(
-            &std::str::from_utf8(text).unwrap().to_string(),
-            x,
-            y,
-            size,
-            color_handle.color,
-        );
+    shim_fn!(
+        interpreter,
+        fn draw_text(text: &str, x: f32, y: f32, size: f32, color_handle: &ColorHandle) {
+            draw_text(
+                text,
+                x,
+                y,
+                size,
+                color_handle.color
+            );
 
-        Ok(interpreter.g.the_unit.clone())
-    });
+            Ok(interpreter.g.the_unit.clone())
+        }
+    );
 
     interpreter
         .add_global(
