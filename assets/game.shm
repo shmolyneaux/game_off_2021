@@ -6,12 +6,22 @@ let space_key = 32;
 let blue = color(0.2, 0.2, 1.0, 1.0);
 let white = color(1.0, 1.0, 1.0, 1.0);
 
+let piano_sound = load_sound("piano2.wav");
+
 let x = 0.0;
-let y = 20.0;
+let y = 50.0;
 fn loop() {
+    draw_text(
+        "Version 0.0.0",
+        0.0, 20.0, 30.0, white
+    );
+
     if is_key_pressed(esc_key) {
         // This will terminate since this identifier isn't defined :)
         exit()
+    }
+    if is_key_pressed(space_key) {
+        play_sound(piano_sound);
     }
 
     let down_pressed = is_key_pressed(down_key);
@@ -26,7 +36,7 @@ fn loop() {
     let a = 0;
     draw_text(
         "going up! " + str(is_key_pressed(up_key)),
-        x, y, 30.0, white
+        x, y, 30.0, blue
     );
 }
 

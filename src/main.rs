@@ -1,3 +1,4 @@
+#![allow(incomplete_features)]
 #![feature(allocator_api)]
 #![feature(trait_upcasting)]
 
@@ -6,11 +7,15 @@ use libshim::NewValue;
 use libshim::ShimError;
 use libshim::ShimValue;
 use libshim::Userdata;
-use std::any::Any;
-use std::ops::Deref;
+
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::Mutex;
 
 use libshim::ShimInto;
 
+use macroquad::audio::Sound;
 use macroquad::color::Color;
 use macroquad::prelude::*;
 
@@ -19,6 +24,18 @@ struct ColorHandle {
 }
 
 impl Userdata for ColorHandle {}
+
+#[derive(Copy, Clone)]
+enum SoundState {
+    Loading(usize),
+    Loaded(Sound),
+}
+
+struct SoundHandle {
+    sound: Cell<SoundState>,
+}
+
+impl Userdata for SoundHandle {}
 
 macro_rules! unpack_args {
     ($args:ident, $count:expr,) => {};
@@ -70,8 +87,64 @@ macro_rules! shim_fn {
 
 #[macroquad::main("Shimlang Test")]
 async fn main() {
+    macroquad::file::set_pc_assets_folder("assets");
+
     let allocator = std::alloc::Global;
     let mut interpreter = libshim::Interpreter::new(allocator);
+
+    // Requests to load new sounds are put here by the game script. These are
+    // processed at the start of each loop.
+    let sounds_to_load: Rc<Mutex<Vec<(usize, String)>>> = Rc::default();
+    let sounds_to_load_copy = sounds_to_load.clone();
+
+    // This stores the next ID for new sound load requests
+    let next_sound_request_id_src: Rc<Cell<usize>> = Rc::default();
+    let next_sound_request_id = next_sound_request_id_src.clone();
+
+    // Sounds are put into this hashmap when they're loaded in the main loop.
+    // A sound is removed from this hashmap and put into a loaded SoundHandle the
+    // first time it's played.
+    let unplayed_but_loaded_sounds: Rc<Mutex<HashMap<usize, Sound>>> = Rc::default();
+    let unplayed_but_loaded_sounds_copy = unplayed_but_loaded_sounds.clone();
+
+    shim_fn!(
+        interpreter,
+        fn load_sound(path: &str) {
+            let mut test = sounds_to_load_copy.lock().unwrap();
+
+            let id = next_sound_request_id.get();
+            next_sound_request_id.set(id + 1);
+
+            test.push((id, path.to_string()));
+
+            interpreter.new_value(ShimValue::Userdata(Box::new(SoundHandle {
+                sound: Cell::new(SoundState::Loading(id)),
+            })))
+        }
+    );
+
+    shim_fn!(
+        interpreter,
+        fn play_sound(sound_handle: &SoundHandle) {
+            match sound_handle.sound.get() {
+                SoundState::Loaded(sound) => {
+                    macroquad::audio::play_sound_once(sound);
+                }
+                SoundState::Loading(request_id) => {
+                    if let Some(sound) = unplayed_but_loaded_sounds_copy
+                        .lock()
+                        .unwrap()
+                        .remove(&request_id)
+                    {
+                        macroquad::audio::play_sound_once(sound);
+                        sound_handle.sound.set(SoundState::Loaded(sound));
+                    }
+                }
+            }
+
+            interpreter.new_value(())
+        }
+    );
 
     shim_fn!(
         interpreter,
@@ -99,9 +172,7 @@ async fn main() {
     shim_fn!(
         interpreter,
         fn is_key_pressed(key: u32) {
-            let key_is_down = macroquad::input::is_key_down(
-                macroquad::input::KeyCode::from(key),
-            );
+            let key_is_down = macroquad::input::is_key_down(macroquad::input::KeyCode::from(key));
             interpreter.new_value(key_is_down)
         }
     );
@@ -109,13 +180,7 @@ async fn main() {
     shim_fn!(
         interpreter,
         fn draw_text(text: &str, x: f32, y: f32, size: f32, color_handle: &ColorHandle) {
-            draw_text(
-                text,
-                x,
-                y,
-                size,
-                color_handle.color
-            );
+            draw_text(text, x, y, size, color_handle.color);
 
             Ok(interpreter.g.the_unit.clone())
         }
@@ -132,25 +197,10 @@ async fn main() {
 
     interpreter
         .add_global(
-            b"game_print",
+            b"debug",
             libshim::ShimValue::NativeFn(Box::new(move |args, interpreter| {
                 for arg in args.iter() {
-                    match &*arg.borrow() {
-                        libshim::ShimValue::I128(i) => println!("i128: {}", i),
-                        libshim::ShimValue::F64(f) => println!("f64: {}", f),
-                        libshim::ShimValue::Bool(b) => println!("bool: {}", b),
-                        libshim::ShimValue::Unit => println!("()"),
-                        libshim::ShimValue::Userdata(u) => {
-                            let data = u.deref() as &dyn Any;
-
-                            if let Some(_handle) = data.downcast_ref::<ColorHandle>() {
-                                println!("got color handle!");
-                            } else {
-                                println!("not a color handle");
-                            }
-                        }
-                        _ => println!("other"),
-                    }
+                    dbg!(&*arg.borrow());
                 }
                 Ok(interpreter.g.the_unit.clone())
             })),
@@ -161,7 +211,12 @@ async fn main() {
     let loop_fn = interpreter.interpret(&script).unwrap();
 
     loop {
-        clear_background(BLACK);
+        while let Some((request_id, path)) = sounds_to_load.lock().unwrap().pop() {
+            unplayed_but_loaded_sounds.lock().unwrap().insert(
+                request_id,
+                macroquad::audio::load_sound(&path).await.unwrap(),
+            );
+        }
 
         let result = loop_fn
             .borrow()
@@ -179,6 +234,6 @@ async fn main() {
             }
         }
 
-        next_frame().await
+        next_frame().await;
     }
 }
