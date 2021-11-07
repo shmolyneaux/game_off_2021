@@ -8,15 +8,18 @@ use libshim::ShimError;
 use libshim::ShimValue;
 use libshim::Userdata;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Mutex;
 
 use libshim::ShimInto;
 
 use macroquad::audio::Sound;
 use macroquad::color::Color;
+use macroquad::texture::{
+    Texture2D,
+    DrawTextureParams,
+};
 use macroquad::prelude::*;
 
 struct ColorHandle {
@@ -25,17 +28,69 @@ struct ColorHandle {
 
 impl Userdata for ColorHandle {}
 
+#[derive(Clone)]
+struct DrawParamHandle {
+    params: DrawTextureParams,
+}
+
+impl Userdata for DrawParamHandle {}
+
 #[derive(Copy, Clone)]
-enum SoundState {
+enum AssetState<T> {
     Loading(usize),
-    Loaded(Sound),
+    Loaded(T),
 }
 
-struct SoundHandle {
-    sound: Cell<SoundState>,
+struct AssetHandle<T> {
+    asset: Cell<AssetState<T>>,
 }
 
-impl Userdata for SoundHandle {}
+impl<T: 'static> Userdata for AssetHandle<T> {}
+
+struct TextureHandle {
+    asset: Cell<AssetState<Texture2D>>,
+    params: RefCell<DrawTextureParams>,
+}
+
+impl Userdata for TextureHandle {}
+
+#[derive(Clone)]
+struct AssetLoader<T> {
+    // Requests to load new sounds are put here by the game script. These are
+    // processed at the start of each loop.
+    to_load: Rc<RefCell<Vec<(usize, String)>>>,
+
+    // This stores the next ID for new sound load requests
+    next_request_id: Rc<Cell<usize>>,
+
+    // Sounds are put into this hashmap when they're loaded in the main loop.
+    // A sound is removed from this hashmap and put into a loaded AssetHandle<T> the
+    // first time it's played.
+    loaded_asset: Rc<RefCell<HashMap<usize, T>>>,
+}
+
+impl<T> AssetLoader<T> {
+    fn load(&self, path: &str) -> usize {
+        let mut load_list = self.to_load.borrow_mut();
+
+        let id = self.next_request_id.get();
+        self.next_request_id.set(id + 1);
+
+        load_list.push((id, path.to_string()));
+
+        id
+    }
+}
+
+impl<T> Default for AssetLoader<T> {
+    fn default() -> Self {
+        Self {
+            to_load: Default::default(),
+            next_request_id: Default::default(),
+            loaded_asset: Default::default(),
+        }
+    }
+}
 
 macro_rules! unpack_args {
     ($args:ident, $count:expr,) => {};
@@ -92,52 +147,118 @@ async fn main() {
     let allocator = std::alloc::Global;
     let mut interpreter = libshim::Interpreter::new(allocator);
 
-    // Requests to load new sounds are put here by the game script. These are
-    // processed at the start of each loop.
-    let sounds_to_load: Rc<Mutex<Vec<(usize, String)>>> = Rc::default();
-    let sounds_to_load_copy = sounds_to_load.clone();
-
-    // This stores the next ID for new sound load requests
-    let next_sound_request_id_src: Rc<Cell<usize>> = Rc::default();
-    let next_sound_request_id = next_sound_request_id_src.clone();
-
-    // Sounds are put into this hashmap when they're loaded in the main loop.
-    // A sound is removed from this hashmap and put into a loaded SoundHandle the
-    // first time it's played.
-    let unplayed_but_loaded_sounds: Rc<Mutex<HashMap<usize, Sound>>> = Rc::default();
-    let unplayed_but_loaded_sounds_copy = unplayed_but_loaded_sounds.clone();
-
+    let sound_asset_loader_og: AssetLoader<Sound> = Default::default();
+    let sound_asset_loader = sound_asset_loader_og.clone();
     shim_fn!(
         interpreter,
         fn load_sound(path: &str) {
-            let mut test = sounds_to_load_copy.lock().unwrap();
+            interpreter.new_value(ShimValue::Userdata(Box::new(AssetHandle {
+                asset: Cell::new(AssetState::<Sound>::Loading(sound_asset_loader.load(path))),
+            })))
+        }
+    );
 
-            let id = next_sound_request_id.get();
-            next_sound_request_id.set(id + 1);
+    let sound_asset_loader = sound_asset_loader_og.clone();
+    shim_fn!(
+        interpreter,
+        fn play_sound(sound_handle: &AssetHandle<Sound>) {
+            match sound_handle.asset.get() {
+                AssetState::Loaded(sound) => {
+                    macroquad::audio::play_sound_once(sound);
+                }
+                AssetState::Loading(request_id) => {
+                    if let Some(sound) = sound_asset_loader.loaded_asset
+                        .borrow_mut()
+                        .remove(&request_id)
+                    {
+                        macroquad::audio::play_sound_once(sound);
+                        sound_handle.asset.set(AssetState::Loaded(sound));
+                    }
+                }
+            }
 
-            test.push((id, path.to_string()));
+            interpreter.new_value(())
+        }
+    );
 
-            interpreter.new_value(ShimValue::Userdata(Box::new(SoundHandle {
-                sound: Cell::new(SoundState::Loading(id)),
+    let texture_asset_loader_og: AssetLoader<Texture2D> = Default::default();
+    let texture_asset_loader = texture_asset_loader_og.clone();
+    shim_fn!(
+        interpreter,
+        fn load_texture(path: &str) {
+            interpreter.new_value(ShimValue::Userdata(Box::new(TextureHandle {
+                asset: Cell::new(AssetState::<Texture2D>::Loading(texture_asset_loader.load(path))),
+                params: Default::default(),
+            })))
+        }
+    );
+
+    let texture_asset_loader = texture_asset_loader_og.clone();
+    shim_fn!(
+        interpreter,
+        fn load_texture_with_params(path: &str, params: &DrawParamHandle) {
+            interpreter.new_value(ShimValue::Userdata(Box::new(TextureHandle {
+                asset: Cell::new(AssetState::<Texture2D>::Loading(texture_asset_loader.load(path))),
+                params: RefCell::new((&params.params).clone()),
             })))
         }
     );
 
     shim_fn!(
         interpreter,
-        fn play_sound(sound_handle: &SoundHandle) {
-            match sound_handle.sound.get() {
-                SoundState::Loaded(sound) => {
-                    macroquad::audio::play_sound_once(sound);
+        fn update_texture_params(texture_handle: &TextureHandle, params: &DrawParamHandle) {
+            texture_handle.params.replace(params.params.clone());
+            interpreter.new_value(())
+        }
+    );
+
+    shim_fn!(
+        interpreter,
+        fn draw_params(ds_x: f32, ds_y: f32, r_x: f32, r_y: f32, r_w: f32, r_h: f32, rot:f32, flip_x: bool, flip_y: bool) {
+            interpreter.new_value(ShimValue::Userdata(Box::new(
+                DrawParamHandle {
+                    params: DrawTextureParams {
+                        dest_size: Some(macroquad::math::Vec2::new(ds_x, ds_y)),
+                        source: Some(macroquad::math::Rect::new(r_x, r_y, r_w, r_h)),
+                        rotation: rot,
+                        flip_x: flip_x,
+                        flip_y: flip_y,
+                        pivot: None,
+                    },
                 }
-                SoundState::Loading(request_id) => {
-                    if let Some(sound) = unplayed_but_loaded_sounds_copy
-                        .lock()
-                        .unwrap()
+            )))
+        }
+    );
+
+    shim_fn!(
+        interpreter,
+        fn default_draw_params() {
+            interpreter.new_value(ShimValue::Userdata(Box::new(
+                DrawParamHandle {
+                    params: Default::default(),
+                }
+            )))
+        }
+    );
+
+    let texture_asset_loader = texture_asset_loader_og.clone();
+    shim_fn!(
+        interpreter,
+        fn draw_texture(texture_handle: &TextureHandle, x: f32, y: f32, color: &ColorHandle) {
+            match (texture_handle.asset.get(), texture_handle.params.borrow()) {
+                (AssetState::Loaded(texture), params) => {
+                    macroquad::texture::draw_texture_ex(
+                        texture, x, y, color.color, params.clone()
+                    );
+                }
+                (AssetState::Loading(request_id), params) => {
+                    if let Some(texture) = texture_asset_loader.loaded_asset
+                        .borrow_mut()
                         .remove(&request_id)
                     {
-                        macroquad::audio::play_sound_once(sound);
-                        sound_handle.sound.set(SoundState::Loaded(sound));
+                        texture.set_filter(macroquad::texture::FilterMode::Nearest);
+                        macroquad::texture::draw_texture_ex(texture, x, y, color.color, params.clone());
+                        texture_handle.asset.set(AssetState::Loaded(texture));
                     }
                 }
             }
@@ -195,6 +316,13 @@ async fn main() {
         }
     );
 
+    shim_fn!(
+        interpreter,
+        fn frame_time() {
+            interpreter.new_value(macroquad::telemetry::frame().full_frame_time)
+        }
+    );
+
     interpreter
         .add_global(
             b"debug",
@@ -207,14 +335,31 @@ async fn main() {
         )
         .unwrap();
 
+    let should_exit: Rc<Cell<bool>> = Default::default();
+    let should_exit_closed = should_exit.clone();
+    shim_fn!(
+        interpreter,
+        fn exit() {
+            should_exit_closed.set(true);
+            interpreter.new_value(())
+        }
+    );
+
     let script = load_file("game.shm").await.unwrap();
     let loop_fn = interpreter.interpret(&script).unwrap();
 
     loop {
-        while let Some((request_id, path)) = sounds_to_load.lock().unwrap().pop() {
-            unplayed_but_loaded_sounds.lock().unwrap().insert(
+        while let Some((request_id, path)) = sound_asset_loader_og.to_load.borrow_mut().pop() {
+            sound_asset_loader_og.loaded_asset.borrow_mut().insert(
                 request_id,
                 macroquad::audio::load_sound(&path).await.unwrap(),
+            );
+        }
+
+        while let Some((request_id, path)) = texture_asset_loader_og.to_load.borrow_mut().pop() {
+            texture_asset_loader_og.loaded_asset.borrow_mut().insert(
+                request_id,
+                macroquad::texture::load_texture(&path).await.unwrap(),
             );
         }
 
@@ -232,6 +377,10 @@ async fn main() {
                 println!("Some other error");
                 return;
             }
+        }
+
+        if should_exit.get() {
+            break;
         }
 
         next_frame().await;

@@ -6,37 +6,57 @@ let space_key = 32;
 let blue = color(0.2, 0.2, 1.0, 1.0);
 let white = color(1.0, 1.0, 1.0, 1.0);
 
-let piano_sound = load_sound("piano2.wav");
+//let piano_sound = load_sound("piano2.wav");
+let tilemap = load_texture(
+    "monochrome_tilemap_transparent_packed.png"
+);
+update_texture_params(
+    tilemap,
+    draw_params(
+        32., 32.,
+        9.*16., 0., 16., 16.,
+        0.,
+        false,
+        false,
+    ),
+);
 
-let x = 0.0;
-let y = 50.0;
+let x = 0.;
+let y = 50.;
+let cell_x = 0.;
+let cell_y = 0.;
 fn loop() {
     draw_text(
-        "Version 0.0.0",
-        0.0, 20.0, 30.0, white
+        "Frame time: " + str(frame_time() * 1000.),
+        0., 20., 30., white
     );
 
     if is_key_pressed(esc_key) {
         // This will terminate since this identifier isn't defined :)
         exit()
     }
-    if is_key_pressed(space_key) {
-        play_sound(piano_sound);
-    }
+    //if is_key_pressed(space_key) {
+    //    play_sound(piano_sound);
+    //}
 
     let down_pressed = is_key_pressed(down_key);
     let up_pressed = is_key_pressed(up_key);
     if down_pressed {
-        y = y + 4.0;
+        y = y + 4.;
     }
     if up_pressed {
-        y = y - 4.0;
+        y = y - 4.;
     }
 
     let a = 0;
     draw_text(
         "going up! " + str(is_key_pressed(up_key)),
-        x, y, 30.0, blue
+        x, y, 30., blue
+    );
+
+    draw_texture(
+        tilemap,
+        0., 100., blue
     );
 }
 
