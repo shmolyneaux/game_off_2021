@@ -119,7 +119,7 @@ macro_rules! count {
     }
 }
 
-macro_rules! shim_fn {
+macro_rules! add_shim_fn {
     (
         $interpreter:ident,
         fn $name:ident ($($arg_v:ident:$arg_t:ty),*) $code:tt) => {
@@ -149,7 +149,7 @@ async fn main() {
 
     let sound_asset_loader_og: AssetLoader<Sound> = Default::default();
     let sound_asset_loader = sound_asset_loader_og.clone();
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn load_sound(path: &str) {
             interpreter.new_value(ShimValue::Userdata(Box::new(AssetHandle {
@@ -159,7 +159,7 @@ async fn main() {
     );
 
     let sound_asset_loader = sound_asset_loader_og.clone();
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn play_sound(sound_handle: &AssetHandle<Sound>) {
             match sound_handle.asset.get() {
@@ -183,7 +183,7 @@ async fn main() {
 
     let texture_asset_loader_og: AssetLoader<Texture2D> = Default::default();
     let texture_asset_loader = texture_asset_loader_og.clone();
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn load_texture(path: &str) {
             interpreter.new_value(ShimValue::Userdata(Box::new(TextureHandle {
@@ -194,7 +194,7 @@ async fn main() {
     );
 
     let texture_asset_loader = texture_asset_loader_og.clone();
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn load_texture_with_params(path: &str, params: &DrawParamHandle) {
             interpreter.new_value(ShimValue::Userdata(Box::new(TextureHandle {
@@ -204,7 +204,7 @@ async fn main() {
         }
     );
 
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn update_texture_params(texture_handle: &TextureHandle, params: &DrawParamHandle) {
             texture_handle.params.replace(params.params.clone());
@@ -212,7 +212,7 @@ async fn main() {
         }
     );
 
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn draw_params(ds_x: f32, ds_y: f32, r_x: f32, r_y: f32, r_w: f32, r_h: f32, rot:f32, flip_x: bool, flip_y: bool) {
             interpreter.new_value(ShimValue::Userdata(Box::new(
@@ -230,7 +230,7 @@ async fn main() {
         }
     );
 
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn default_draw_params() {
             interpreter.new_value(ShimValue::Userdata(Box::new(
@@ -242,7 +242,7 @@ async fn main() {
     );
 
     let texture_asset_loader = texture_asset_loader_og.clone();
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn draw_texture(texture_handle: &TextureHandle, x: f32, y: f32, color: &ColorHandle) {
             match (texture_handle.asset.get(), texture_handle.params.borrow()) {
@@ -267,14 +267,14 @@ async fn main() {
         }
     );
 
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn mouse_pos_x() {
             interpreter.new_value(macroquad::input::mouse_position().0 as f64)
         }
     );
 
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn mouse_pos_y() {
             interpreter.new_value(macroquad::input::mouse_position().1 as f64)
@@ -290,7 +290,7 @@ async fn main() {
         )
         .unwrap();
 
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn is_key_pressed(key: u32) {
             let key_is_down = macroquad::input::is_key_down(macroquad::input::KeyCode::from(key));
@@ -298,7 +298,7 @@ async fn main() {
         }
     );
 
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn draw_text(text: &str, x: f32, y: f32, size: f32, color_handle: &ColorHandle) {
             draw_text(text, x, y, size, color_handle.color);
@@ -307,7 +307,7 @@ async fn main() {
         }
     );
 
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn color(r: f32, g: f32, b: f32, a: f32) {
             interpreter.new_value(ShimValue::Userdata(Box::new(ColorHandle {
@@ -316,7 +316,7 @@ async fn main() {
         }
     );
 
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn frame_time() {
             interpreter.new_value(macroquad::telemetry::frame().full_frame_time)
@@ -337,7 +337,7 @@ async fn main() {
 
     let should_exit: Rc<Cell<bool>> = Default::default();
     let should_exit_closed = should_exit.clone();
-    shim_fn!(
+    add_shim_fn!(
         interpreter,
         fn exit() {
             should_exit_closed.set(true);
